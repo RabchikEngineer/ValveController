@@ -8,7 +8,7 @@
 
 #include "driver/gpio.h"
 
-#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_continuous.h"
 
 
 
@@ -19,19 +19,37 @@
 #define INPUT_PERCENT_PIN ADC_CHANNEL_4
 // #define OUTPUT_PERCENT_PIN 2
 
+
+#define ADC_RESULT_BYTE         4  // ESP32-C3 specific
+#define SAMPLE_FREQ_HZ          5000  // 5 kHz sampling
+#define BUFFER_SIZE             2048   // Must be multiple of ADC_RESULT_BYTE
+#define READ_LEN                2048
+#define ADC_UNIT                ADC_UNIT_1
+#define ADC_CONV_MODE           ADC_CONV_SINGLE_UNIT_1
+#define ADC_ATTEN               ADC_ATTEN_DB_2_5
+#define ADC_BIT_WIDTH           SOC_ADC_DIGI_MAX_BITWIDTH
+#define ADC_OUTPUT_TYPE         ADC_DIGI_OUTPUT_FORMAT_TYPE2
+
+
+
 const char *TAG_PID = "PID System";
 const char *TAG_INPUT = "Input Handler";
 const char *TAG_PISTON = "Piston Controller";
 const char *TAG_ADC = "ADC";
 const char *TAG = "Main Thread";
 
+
+static adc_channel_t channels[2] = {ADC_CHANNEL_3, ADC_CHANNEL_4};
+
+
 volatile bool led_state = 0;
-volatile bool desired_position = 0;
-volatile bool current_position = 0;
+// volatile bool desired_position = 0;
+// volatile bool current_position = 0;
+static volatile float latest_actual_position = 0.0f;
+static volatile float latest_desired_position = 0.0f;
 
 QueueHandle_t inputQueue;
 QueueHandle_t outputQueue;
-
 
 typedef struct {
     float desiredPositionPercent;
@@ -44,15 +62,13 @@ typedef enum {
     CONTROL_STOP
 } ControlCommand_t;
 
-adc_oneshot_unit_handle_t adc1_handle;
+static adc_continuous_handle_t adc_handle = NULL;
 
 
 void fan_control_task(void *arg) {
 
 
     while (1) {
-
-        
 
         ESP_LOGI(TAG_PISTON,"I'm alive...");
         
@@ -90,37 +106,106 @@ void fan_control_task(void *arg) {
 // }
 
 
+void continuous_adc_init(adc_channel_t *channel, uint8_t channel_num, adc_continuous_handle_t *out_handle) {
+    adc_continuous_handle_t handle = NULL;
 
-
-void configure_adc(adc_atten_t ADC_ATTEN) {
-    //-------------ADC1 Init---------------//
-    adc_oneshot_unit_init_cfg_t init_config1 = {
-        .unit_id = ADC_UNIT_1,
+    // Step 1: Create handle with buffer configuration
+    adc_continuous_handle_cfg_t adc_config = {
+        .max_store_buf_size = BUFFER_SIZE,
+        .conv_frame_size = READ_LEN,  // Replaced conv_num_each_intr
     };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
 
-    //-------------ADC1 Config---------------//
-    adc_oneshot_chan_cfg_t config = {
-        .bitwidth = ADC_BITWIDTH_12,
-        .atten = ADC_ATTEN,
+    // Step 2: Configure ADC controller
+    adc_continuous_config_t dig_cfg = {
+        .sample_freq_hz = SAMPLE_FREQ_HZ,
+        .conv_mode = ADC_CONV_MODE,
+        .format = ADC_OUTPUT_TYPE,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, CURRENT_POSITION_PIN, &config));
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, INPUT_PERCENT_PIN, &config));
 
+    // Step 3: Configure channel patterns
+    adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
+    dig_cfg.pattern_num = channel_num;
+    
+    for (int i = 0; i < channel_num; i++) {
+        adc_pattern[i].atten = ADC_ATTEN;
+        adc_pattern[i].channel = channel[i] & 0x7;
+        adc_pattern[i].unit = ADC_UNIT;
+        adc_pattern[i].bit_width = ADC_BIT_WIDTH;
+
+        ESP_LOGI(TAG_ADC, "adc_pattern[%d].atten is :%x", i, adc_pattern[i].atten);
+        ESP_LOGI(TAG_ADC, "adc_pattern[%d].channel is :%x", i, adc_pattern[i].channel);
+        ESP_LOGI(TAG_ADC, "adc_pattern[%d].unit is :%x", i, adc_pattern[i].unit);
+    }
+    
+    dig_cfg.adc_pattern = adc_pattern;
+    ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
+
+    *out_handle = handle;
 }
 
 
-float read_actual_position(adc_channel_t pin) {
-    int adc_raw=0;
 
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, pin, &adc_raw));
+void adc_continuous_read_task(void *arg) {
+    uint8_t result[READ_LEN] = {0};
+    uint32_t ret_num = 0;
+    esp_err_t ret;
     
-    // ESP_LOGI(TAG_ADC, "Calibrated: %d",adc_calibrated);
-    ESP_LOGI(TAG_ADC,"Value on %i: %i", pin, adc_raw);
-
-    return adc_raw;
-
-
+    // Start continuous conversion
+    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+    ESP_LOGI(TAG_ADC, "ADC continuous mode started");
+    
+    while (1) {
+        // Read bytes - blocking with portMAX_DELAY
+        ret = adc_continuous_read(adc_handle, result, READ_LEN, &ret_num, portMAX_DELAY);
+        
+        if (ret == ESP_OK) {
+            int64_t sum_ch3 = 0, count_ch3 = READ_LEN/ADC_RESULT_BYTE/2; // 4 bytes per sample, 2 channels
+            int64_t sum_ch4 = 0, count_ch4 = READ_LEN/ADC_RESULT_BYTE/2;
+            
+            // Process samples - accumulate for averaging
+            for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
+                adc_digi_output_data_t *p = (adc_digi_output_data_t*)&result[i];
+                
+                uint32_t chan_num = p->type2.channel;
+                uint32_t data = p->type2.data;
+                
+                // Check valid channel
+                if (chan_num < SOC_ADC_CHANNEL_NUM(ADC_UNIT)) {
+                    if (chan_num == 3) {
+                        sum_ch3 += data;
+                        // count_ch3++;
+                    } else if (chan_num == 4) {
+                        sum_ch4 += data;
+                        // count_ch4++;
+                    }
+                }
+            }
+            
+            // Average with float precision (effective resolution increase)
+            // if (count_ch3 > 0) {
+                latest_actual_position = (float)sum_ch3 / (float)count_ch3;
+            // }
+            // if (count_ch4 > 0) {
+                latest_desired_position = (float)sum_ch4 / (float)count_ch4;
+            // }
+            
+            // ESP_LOGI(TAG_ADC, "Pos: %.3f, Input: %.3f (samples: %lld/%lld)", 
+            //          latest_actual_position, latest_desired_position, count_ch3, count_ch4);
+                     
+        } else if (ret == ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG_ADC, "ADC read timeout");
+        } else {
+            ESP_LOGE(TAG_ADC, "ADC read error: %d", ret);
+        }
+        
+        // Small delay to prevent watchdog timeout
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    
+    // Cleanup (never reached)
+    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
+    ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
 }
 
 
@@ -131,13 +216,13 @@ void input_task(void *params) {
         // Read desired position from ADC or 4-20mA interface
         // data.desiredPositionPercent = ReadDesiredPosition();
         // data.desiredPositionPercent = 1500;
-        data.desiredPositionPercent = read_actual_position(INPUT_PERCENT_PIN);
+        data.desiredPositionPercent = latest_desired_position;
         // Read actual valve position from ADC
         // data.actualPositionPercent = ReadActualPosition();
-        data.actualPositionPercent = read_actual_position(CURRENT_POSITION_PIN);
+        data.actualPositionPercent = latest_actual_position;
         // Send to PID task
         xQueueSend(inputQueue, &data, portMAX_DELAY);
-        vTaskDelay(pdMS_TO_TICKS(500)); // adjust sample rate
+        vTaskDelay(pdMS_TO_TICKS(10)); // adjust sample rate
     }
 }
 
@@ -174,12 +259,13 @@ void PID_task(void *params) {
     // PIDController pid;
     // PID_Init(&pid); // initialize PID with tuned params
     float controlOutput;
-    float threshold = 10;
+    float threshold = 30;
 
     while (1) {
         if (xQueueReceive(inputQueue, &receivedData, portMAX_DELAY) == pdPASS) {
+
             // controlOutput = PID_Compute(&pid, receivedData.desiredPositionPercent, receivedData.actualPositionPercent);
-            controlOutput=receivedData.actualPositionPercent-receivedData.desiredPositionPercent;
+            controlOutput=receivedData.desiredPositionPercent-receivedData.actualPositionPercent;
             // Convert controlOutput to command for valves
             if(controlOutput > threshold) {
                 command = CONTROL_INCREASE;
@@ -188,6 +274,8 @@ void PID_task(void *params) {
             } else {
                 command = CONTROL_STOP;
             }
+            ESP_LOGI(TAG_PID, "Pos: %.3f, Desired: %.3f, %i", 
+                     receivedData.actualPositionPercent, receivedData.desiredPositionPercent, command);
             xQueueSend(outputQueue, &command, portMAX_DELAY);
         }
     }
@@ -217,18 +305,20 @@ void app_main(void)
     inputQueue = xQueueCreate(10, sizeof(ValvePositionData_t));
     outputQueue = xQueueCreate(10, sizeof(ControlCommand_t));
 
-    configure_adc(ADC_ATTEN_DB_2_5);
+
+    continuous_adc_init(channels, sizeof(channels) / sizeof(adc_channel_t), &adc_handle);
     ESP_LOGI(TAG, "ADC configured");
 
 
-    ESP_LOGI(TAG, "Starting fan control task...");
-    xTaskCreate(fan_control_task, "Fan task", 2048, NULL, 5, NULL);
-    xTaskCreate(input_task, "Input Task", 2048, NULL, 5, NULL);
-    xTaskCreate(PID_task, "PID Task", 2048, NULL, 5, NULL);
-    xTaskCreate(output_task, "Output Task", 2048, NULL, 5, NULL);
+    ESP_LOGI(TAG, "Starting tasks...");
+    xTaskCreate(adc_continuous_read_task, "ADC Continuous", 8192, NULL, 10, NULL);
+    xTaskCreate(input_task, "Input Task", 2048, NULL, 7, NULL);
+    xTaskCreate(PID_task, "PID Task", 2048, NULL, 8, NULL);
+    xTaskCreate(output_task, "Output Task", 2048, NULL, 9, NULL);
+    ESP_LOGI(TAG, "Tasks started...");
 
 
-
+    // xTaskCreate(fan_control_task, "Fan task", 2048, NULL, 5, NULL);
     // xTaskCreate(rpm_task, "rpm_task", 2048, NULL, 5, NULL);
 }
 
