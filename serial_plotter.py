@@ -1,9 +1,9 @@
 import serial
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.widgets import Slider, TextBox
 from collections import deque
 import re
-
 import matplotlib
 from serial.serialutil import SerialException
 
@@ -18,7 +18,7 @@ matplotlib.use('qt5agg')
 SERIAL_PORTS = ['/dev/ttyACM0','/dev/ttyACM1']  # Change to your port (Linux: /dev/ttyUSB0, Mac: /dev/cu.usbserial-*)
 current_port=0
 BAUD_RATE = 9600
-MAX_POINTS = 200  # Number of points to display
+MAX_POINTS = 800  # Number of points to display
 
 # Data storage
 timestamps = deque(maxlen=MAX_POINTS)
@@ -27,14 +27,28 @@ desired_values = deque(maxlen=MAX_POINTS)
 pid_outputs = deque(maxlen=MAX_POINTS)
 integrals = deque(maxlen=MAX_POINTS)
 
+# PID coefficients
+kp, ki, kd = 0.002, 0.001, 0.001
+initial_values_loaded = False
+
 # Initialize serial connection
 ser = None
 
 # Create figure with subplots
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-ax1.set_ylim(1500, 2900)    # For actual and desired positions
+fig_plot = plt.figure(figsize=(12, 8))
+ax1 = fig_plot.add_subplot(2, 1, 1)  # Position plot
+ax2 = fig_plot.add_subplot(2, 1, 2)  # PID plot
+
+# Create separate control window
+fig_control = plt.figure(figsize=(8, 2))
+fig_control.canvas.manager.set_window_title('PID Control Panel')
+
+ax1.set_ylim(1500, 2900)
 ax2.set_ylim(-1.0, 1.0)
-fig.suptitle('ESP32 PID Controller Real-Time Monitor')
+
+
+fig_plot.suptitle('ESP32 PID Controller Real-Time Monitor')
+
 
 # Initialize empty lines
 line_actual, = ax1.plot([], [], 'b-', label='Actual', linewidth=2)
@@ -56,9 +70,129 @@ ax2.grid(True)
 sample_count = 0
 
 
+# Create sliders (use fig_control instead of plt.axes)
+slider_height = 0.1
+slider_left = 0.15
+slider_width = 0.65
+slider_spacing = 0.3
+slider_position = 0.8
+val_precision = 0.01
+
+# Position sliders from TOP of control window
+ax_kp = fig_control.add_axes([slider_left, slider_position, slider_width, slider_height])
+ax_ki = fig_control.add_axes([slider_left, slider_position - slider_spacing, slider_width, slider_height])
+ax_kd = fig_control.add_axes([slider_left, slider_position - 2 * slider_spacing, slider_width, slider_height])
+
+slider_kp = Slider(ax_kp, 'Kp', 0.0, 5.0, valinit=kp, valstep=val_precision)
+slider_ki = Slider(ax_ki, 'Ki', 0.0, 5.0, valinit=ki, valstep=val_precision)
+slider_kd = Slider(ax_kd, 'Kd', 0.0, 5.0, valinit=kd, valstep=val_precision)
+
+# Create text boxes for manual entry
+textbox_left = slider_left + slider_width + 0.02
+textbox_width = 0.12
+
+ax_text_kp = fig_control.add_axes([textbox_left, slider_position, textbox_width, slider_height])
+ax_text_ki = fig_control.add_axes([textbox_left, slider_position - slider_spacing, textbox_width, slider_height])
+ax_text_kd = fig_control.add_axes([textbox_left, slider_position - 2 * slider_spacing, textbox_width, slider_height])
+
+text_kp = TextBox(ax_text_kp, '', initial=f'{kp:.4f}')
+text_ki = TextBox(ax_text_ki, '', initial=f'{ki:.4f}')
+text_kd = TextBox(ax_text_kd, '', initial=f'{kd:.4f}')
+
+
+def send_pid_values():
+    """Send PID values to ESP32 via serial"""
+    global ser, kp, ki, kd
+    if ser is not None and ser.is_open:
+        try:
+            message = f"{kp:.6f} {ki:.6f} {kd:.6f}\n"
+            ser.write(message.encode())
+            print(f"Sent to ESP32: Kp={kp:.6f}, Ki={ki:.6f}, Kd={kd:.6f}")
+        except Exception as e:
+            print(f"Error sending data: {e}")
+
+
+def update_kp(val):
+    global kp
+    kp = val
+    text_kp.set_val(f'{kp:.4f}')
+    send_pid_values()
+
+
+def update_ki(val):
+    global ki
+    ki = val
+    text_ki.set_val(f'{ki:.4f}')
+    send_pid_values()
+
+
+def update_kd(val):
+    global kd
+    kd = val
+    text_kd.set_val(f'{kd:.4f}')
+    send_pid_values()
+
+
+def submit_kp(text):
+    try:
+        val = float(text)
+        if 0.0 <= val <= 5.0:
+            slider_kp.set_val(val)
+    except ValueError:
+        text_kp.set_val(f'{kp:.4f}')
+
+
+def submit_ki(text):
+    try:
+        val = float(text)
+        if 0.0 <= val <= 5.0:
+            slider_ki.set_val(val)
+    except ValueError:
+        text_ki.set_val(f'{ki:.4f}')
+
+
+def submit_kd(text):
+    try:
+        val = float(text)
+        if 0.0 <= val <= 5.0:
+            slider_kd.set_val(val)
+    except ValueError:
+        text_kd.set_val(f'{kd:.4f}')
+
+
+# Connect callbacks
+slider_kp.on_changed(update_kp)
+slider_ki.on_changed(update_ki)
+slider_kd.on_changed(update_kd)
+
+text_kp.on_submit(submit_kp)
+text_ki.on_submit(submit_ki)
+text_kd.on_submit(submit_kd)
+
+
 def parse_line(line):
     """Parse ESP32 log line and extract values"""
-    # Example line: "I (89326) PID System: A: 2163.492/D: 2148.637,I: 5.7 , dt: 0.10000, -0.0699"
+    global initial_values_loaded, kp, ki, kd
+
+    # Check for initial PID values: "Current PID: x y z"
+    if 'Current PID:' in line and not initial_values_loaded:
+        match = re.search(r'Current PID:\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)', line)
+        if match:
+            kp = float(match.group(1))
+            ki = float(match.group(2))
+            kd = float(match.group(3))
+
+            # Update sliders and textboxes
+            slider_kp.set_val(kp)
+            slider_ki.set_val(ki)
+            slider_kd.set_val(kd)
+            text_kp.set_val(f'{kp:.4f}')
+            text_ki.set_val(f'{ki:.4f}')
+            text_kd.set_val(f'{kd:.4f}')
+
+            initial_values_loaded = True
+            print(f"Initial PID loaded: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
+            return None, None, None, None
 
     # Extract A (Actual)
     match_actual = re.search(r'A:\s*([\d.]+)', line)
@@ -80,19 +214,17 @@ def parse_line(line):
 
 
 def update_plot(frame):
-    global sample_count,ser,current_port
+    global sample_count, ser, current_port
 
     try:
-        # Read line from serial
-
         if ser is None:
             raise Exception("initial exception")
 
         if ser.in_waiting:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
 
-            # Only process PID System lines
-            if 'PID System' in line:
+            # Parse for both PID data and initial config
+            if 'PID System' in line or 'Current PID:' in line:
                 actual, desired, integral, pid = parse_line(line)
 
                 if actual is not None and desired is not None:
@@ -100,7 +232,7 @@ def update_plot(frame):
                     timestamps.append(sample_count)
                     actual_values.append(actual)
                     desired_values.append(desired)
-                    integrals.append(integral/100 if integral else 0)
+                    integrals.append(integral / 100 if integral else 0)
                     pid_outputs.append(pid if pid else 0)
 
                     sample_count += 1
@@ -111,25 +243,27 @@ def update_plot(frame):
                     line_pid.set_data(timestamps, pid_outputs)
                     line_integral.set_data(timestamps, integrals)
 
-                    # # Auto-scale axes
+                    # Auto-scale axes
                     ax1.relim()
                     ax1.autoscale_view()
                     ax2.relim()
                     ax2.autoscale_view()
 
                     # Print to console
-                    print(f"Sample {sample_count}: A={actual:.2f}, D={desired:.2f}, I={integral:.2f}, PID={pid:.3f}")
+                    print(f"Sample {sample_count}: A={actual:.2f}, D={desired:.2f}, "
+                          f"delta={abs(desired - actual):.2f}, I={integral:.2f}, PID={pid:.3f}")
 
     except Exception as e:
         if "Errno 5" in str(e) or "initial" in str(e):
-            current_port+=1
-            if current_port>=len(SERIAL_PORTS):
-                current_port=0
+            current_port += 1
+            if current_port >= len(SERIAL_PORTS):
+                current_port = 0
             try:
-                ser=serial.Serial(SERIAL_PORTS[current_port], BAUD_RATE, timeout=1)
+                ser = serial.Serial(SERIAL_PORTS[current_port], BAUD_RATE, timeout=1)
+                print(f"Connected to {SERIAL_PORTS[current_port]}")
             except SerialException:
                 pass
-            print("reconnecting with other port...")
+            print("Reconnecting with other port...")
         else:
             print(f"Error: {e}")
 
@@ -137,10 +271,10 @@ def update_plot(frame):
 
 
 # Start animation
-ani = animation.FuncAnimation(fig, update_plot, interval=50, blit=True, cache_frame_data=False)
+ani = animation.FuncAnimation(fig_plot, update_plot, interval=10, blit=True, cache_frame_data=False)
 
-plt.tight_layout()
 plt.show()
 
 # Cleanup
-ser.close()
+if ser is not None:
+    ser.close()

@@ -4,6 +4,11 @@
 #include "cJSON.h"
 #include "math.h"
 
+//for serial communication
+#include <stdio.h>
+#include <string.h>
+#include "driver/usb_serial_jtag.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -52,6 +57,22 @@ typedef struct {
     float actualPositionPercent;
 } ValvePositionData_t;
 
+typedef struct {
+    float kp;
+    float ki;
+    float kd;
+} PIDConfig_t;
+
+typedef struct {
+    float x;
+    float y;
+} DataPoint_t;
+
+typedef struct {
+    int num_points;
+    DataPoint_t* points;
+} ApproxPoly_t;
+
 QueueHandle_t inputQueue;
 QueueHandle_t outputQueue;
 
@@ -60,6 +81,7 @@ static adc_channel_t channels[2] = {ADC_CHANNEL_3, ADC_CHANNEL_4};
 static adc_continuous_handle_t adc_handle = NULL;
 
 const TickType_t polling_delay = pdMS_TO_TICKS(100);
+const float PID_ATTENUATION = 1000.0f; // so that we can use higher Kp,Ki,Kd
 
 
 volatile bool led_state = 0;
@@ -71,28 +93,41 @@ volatile float valve_activation_threshold = 0.2; //for -1 --- 1 pid output
 float adc_prev_value_weight = 0.6;
 float adc_curr_value_weight = 0.4;
 
-
 //zone in which integral doesnt calculates, so the system ceases to stabilize
 //so accuracy shold be 20/4096=0.5%
 float dead_zone_size = 20; 
 
-
-
-// typedef enum {
-//     CONTROL_INCREASE,
-//     CONTROL_DECREASE,
-//     CONTROL_STOP
-// } ControlCommand_t;
-
+PIDConfig_t g_config = {
+    2.0f, 
+    1.0f, 
+    2.0f
+};
 
 
 
-// #include "driver/uart.h"
+float test_desired_data[200] = {
+    1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
+    2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 
+    2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 
+    2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 
+    1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
+    2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 
+    1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
+    2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000};
+
+
+
+
+
+
+
+
+
 
 // // Define UART port and pins
 // #define UART_PORT UART_NUM_1 // Example: Using UART1
-// #define UART_TX_PIN GPIO_NUM_4
-// #define UART_RX_PIN GPIO_NUM_5
+// #define UART_TX_PIN GPIO_NUM_20
+// #define UART_RX_PIN GPIO_NUM_21
 
 // void uart_init() {
 //     uart_config_t uart_config = {
@@ -110,6 +145,17 @@ float dead_zone_size = 20;
 //     // Install UART driver, and get the queue.
 //     uart_driver_install(UART_PORT, 256, 0, 0, NULL, 0);
 // }
+
+void usb_jtag_init() {
+
+    // Install USB driver
+    usb_serial_jtag_driver_config_t usb_cfg = {
+        .rx_buffer_size = 1024,
+        .tx_buffer_size = 1024,
+    };
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_cfg));
+}
+
 
 
 void continuous_adc_init(adc_channel_t *channel, uint8_t channel_num, adc_continuous_handle_t *out_handle) {
@@ -195,7 +241,7 @@ void adc_continuous_read_task(void *arg) {
     uint32_t ret_num = 0;
     esp_err_t ret;
 
-    
+    int test_pos=0;
     
     // Start continuous conversion
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
@@ -229,13 +275,16 @@ void adc_continuous_read_task(void *arg) {
                 }
             }
             
-            // Average with float precision (effective resolution increase)
-            // if (count_ch3 > 0) {
-                latest_actual_position = latest_actual_position*adc_prev_value_weight+((float)sum_ch3 / (float)count_ch3)*adc_curr_value_weight;
-            // }
-            // if (count_ch4 > 0) {
-                latest_desired_position = latest_desired_position*adc_prev_value_weight+((float)sum_ch4 / (float)count_ch4)*adc_curr_value_weight;
-            // }
+            
+            latest_actual_position = latest_actual_position*adc_prev_value_weight+((float)sum_ch3 / (float)count_ch3)*adc_curr_value_weight;
+            
+
+            // latest_desired_position = latest_desired_position*adc_prev_value_weight+((float)sum_ch4 / (float)count_ch4)*adc_curr_value_weight;
+            latest_desired_position = latest_desired_position*adc_prev_value_weight+test_desired_data[test_pos/4]*adc_curr_value_weight;
+            test_pos++;
+            if (test_pos>=200*4) {
+                test_pos=0;
+            }
             
             // ESP_LOGI(TAG_ADC, "Pos: %.3f, Input: %.3f (samples: %lld)", 
             //          latest_actual_position, latest_desired_position, count_ch4);
@@ -256,6 +305,58 @@ void adc_continuous_read_task(void *arg) {
 }
 
 
+void usb_input_task() {
+    uint8_t buffer[256];
+    char line_buffer[256];
+    int line_pos = 0;
+    
+    ESP_LOGI(TAG, "Input task started");
+    printf(">>> \n");
+    // fflush(stdout);
+    
+    while (1) {
+        int len = usb_serial_jtag_read_bytes(buffer, sizeof(buffer) - 1, pdMS_TO_TICKS(100));
+        
+        if (len > 0) {
+            for (int i = 0; i < len; i++) {
+                char c = buffer[i];
+                
+                // Echo character
+                usb_serial_jtag_write_bytes((const char*)&c, 1, 0);
+                
+                if (c == '\n' || c == '\r') {
+                    if (line_pos > 0) {
+                        line_buffer[line_pos] = '\0';
+                        
+                        // Parse command
+                        float kp, ki, kd;
+                        if (sscanf(line_buffer, "%f %f %f", &kp, &ki, &kd) == 3) {
+                            g_config.kp = kp;
+                            g_config.ki = ki;
+                            g_config.kd = kd;
+                            
+                            // Use ESP_LOGI for structured logging
+                            ESP_LOGI(TAG, "Config updated: Kp=%.4f Ki=%.4f Kd=%.4f", 
+                                     kp, ki, kd);
+                        } else {
+                            ESP_LOGW(TAG, "Invalid input: %s", line_buffer);
+                        }
+                        
+                        line_pos = 0;
+                        printf(">>> \n");
+                        fflush(stdout);
+                    }
+                } else if (c >= 32 && c < 127) {
+                    if (line_pos < sizeof(line_buffer) - 1) {
+                        line_buffer[line_pos++] = c;
+                    }
+                }
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
 
 
 
@@ -295,9 +396,13 @@ void PID_task(void *params) {
     float dt=0.1f;
     int64_t last_time=0;
 
-    float Kp = 0.004f;
-    float Ki = 0.0005f;
-    float Kd = 0.002f;
+    // float Kp = 0.004f;
+    // float Ki = 0.001f; // работают но с перелётом
+    // float Kd = 0.002f;
+
+    // float Kp = 2.0;
+    // float Ki = 1.0;
+    // float Kd = 2.0;
 
     while (1) {
         if (xQueueReceive(inputQueue, &receivedData, portMAX_DELAY) == pdPASS) {
@@ -309,22 +414,23 @@ void PID_task(void *params) {
             dt = (current_time - last_time) / 1000000.0f; //calculating actual dt. however it might differs only for 1%
             last_time=current_time;
 
-
             float derivative = (error - prev_error) / dt;
-            pid_output = (Kp * error) + (Ki * integral) + (Kd * derivative);
             prev_error = error;
 
+            pid_output = ((g_config.kp * error) + (g_config.ki * integral) + (g_config.kd * derivative)) / PID_ATTENUATION;
 
-            bool saturated = (pid_output > 100.0f) || (pid_output < -100.0f);
+            bool saturated = (pid_output > 1.0f) || (pid_output < -1.0f);
             bool in_dead_zone = (fabsf(error) < dead_zone_size); // doesnt calculate integral in small zone
             // Only integrate if not saturated
             if (!saturated && !in_dead_zone) {
                 integral += error * dt;
                 if (integral > 500.0f) integral = 500.0f; 
                 if (integral < -500.0f) integral = -500.0f;
-            } else {
+            } else if (saturated){
                 // Decay integral slowly when can't actuate
                 integral *= 0.95f;
+            } else if (in_dead_zone){
+                integral = 0;
             }
 
 
@@ -384,9 +490,32 @@ void set_valve_pwm_task() {
 }
 
 
+
+
 void app_main(void)
 {   
+    
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+
     ESP_LOGI(TAG,"Starting program");
+
+
+    printf("Current PID: %.6f %.6f %.6f\n", g_config.kp, g_config.ki, g_config.kd);
+
+    // DataPoint_t* points[] = {{1,2},{2,4}};
+    // // ApproxPoly_t input_approx = {3,points};
+    // ApproxPoly_t input_approx = {
+    // .num_points = 2,
+    // .points = points
+    // };
+
+    // for (int i=0; i<2; i++) {
+
+    //     printf("%f",input_approx.points[i]);
+
+    // }
+    
     
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -412,18 +541,23 @@ void app_main(void)
     ESP_LOGI(TAG, "ADC configured");
 
     valve_pwm_init();
-    ESP_LOGI(TAG, "PWM configured");    
-
+    ESP_LOGI(TAG, "PWM configured");
+    
+    usb_jtag_init();
+    ESP_LOGI(TAG, "USB input configured");
 
     ESP_LOGI(TAG, "Starting tasks...");
     xTaskCreate(adc_continuous_read_task, "ADC Continuous", 8192, NULL, 10, NULL);
     xTaskCreate(input_task, "Input Task", 2048, NULL, 7, NULL);
     xTaskCreate(PID_task, "PID Task", 4096, NULL, 8, NULL);
     xTaskCreate(set_valve_pwm_task, "PWM&Output Task", 2048, NULL, 9, NULL);
+    xTaskCreate(usb_input_task, "input_task", 4096, NULL, 5, NULL);
     ESP_LOGI(TAG, "Tasks started...");
 
 
     // xTaskCreate(fan_control_task, "Fan task", 2048, NULL, 5, NULL);
     // xTaskCreate(rpm_task, "rpm_task", 2048, NULL, 5, NULL);
+
+
 }
 
