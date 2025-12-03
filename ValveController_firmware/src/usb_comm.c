@@ -8,6 +8,7 @@
 #include "usb_comm.h"
 
 
+QueueHandle_t usb_queue;
 PIDConfig_t pid_config = DEFAULT_PID;
 
 static const char *TAG = "USB";

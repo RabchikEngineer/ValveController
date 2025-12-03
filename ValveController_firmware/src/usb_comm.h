@@ -5,7 +5,7 @@
 #include "freertos/queue.h"
 
 void usb_comm_init();
-QueueHandle_t usb_queue;
+extern QueueHandle_t usb_queue;
 
 #endif
 
