@@ -119,12 +119,12 @@ void adc_continuous_read_task(void *arg) {
             latest_actual_position = latest_actual_position*(1-EMA_WEIGHT)+((float)sum_ch3 / (float)count_ch3)*EMA_WEIGHT;
             
 
-            // latest_desired_position = latest_desired_position*adc_prev_value_weight+((float)sum_ch4 / (float)count_ch4)*adc_curr_value_weight;
-            latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+test_desired_data[test_pos/4]*EMA_WEIGHT;
-            test_pos++;
-            if (test_pos>=200*4) {
-                test_pos=0;
-            }
+            latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+((float)sum_ch4 / (float)count_ch4)*EMA_WEIGHT;
+            // latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+test_desired_data[test_pos/4]*EMA_WEIGHT;
+            // test_pos++;
+            // if (test_pos>=200*4) {
+            //     test_pos=0;
+            // }
             
             // ESP_LOGI(TAG, "Pos: %.3f, Input: %.3f (samples: %lld)", 
             //          latest_actual_position, latest_desired_position, count_ch4);
