@@ -6237,6 +6237,26 @@
 		)
 		(uuid "ff4edffe-f00b-416b-8ddd-681bc8fcc62b")
 	)
+	(label "I2C_SCL"
+		(at 152.4 91.44 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "01893676-9b90-490d-9c42-19233ef67ee1")
+	)
+	(label "I2C_SDA"
+		(at 149.86 88.9 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "113543c3-8764-425e-81c1-17b816299b04")
+	)
 	(label "4-20 Input +"
 		(at 31.75 121.92 0)
 		(effects
@@ -9578,7 +9598,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical"
+		(property "Footprint" "Connector_Wire:SolderWire-0.5sqmm_1x03_P4.6mm_D0.9mm_OD2.1mm"
 			(at 256.54 74.93 0)
 			(effects
 				(font
