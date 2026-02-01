@@ -14,11 +14,8 @@ static const char *TAG = "ADC";
 static volatile float latest_actual_position = 0.0f;
 static volatile float latest_desired_position = 0.0f;
 
-
-static adc_channel_t channels[2] = {ADC_CHANNEL_3, ADC_CHANNEL_4};
+static adc_channel_t channels[2] = {ACTUAL_POSITION_PIN, DESIRED_POSITION_PIN};
 static adc_continuous_handle_t adc_handle = NULL;
-
-
 
 
 float test_desired_data[200] = {
@@ -125,6 +122,7 @@ void adc_continuous_read_task(void *arg) {
             // if (test_pos>=200*4) {
             //     test_pos=0;
             // }
+            // latest_desired_position = 2000;
             
             // ESP_LOGI(TAG, "Pos: %.3f, Input: %.3f (samples: %lld)", 
             //          latest_actual_position, latest_desired_position, count_ch4);

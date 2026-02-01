@@ -1,8 +1,8 @@
 
 #define VALVE_INC_PIN 0 
 #define VALVE_DEC_PIN 1 
-#define CURRENT_POSITION_PIN ADC_CHANNEL_3
-#define INPUT_PERCENT_PIN ADC_CHANNEL_4
+#define ACTUAL_POSITION_PIN     ADC_CHANNEL_3
+#define DESIRED_POSITION_PIN    ADC_CHANNEL_4
 // #define OUTPUT_PERCENT_PIN 2
 
 
@@ -25,6 +25,28 @@
 #define PWM_TIMER           LEDC_TIMER_0
 
 
+#define I2C_PORT        0
+#define I2C_SDA_GPIO    8      
+#define I2C_SCL_GPIO    9
+#define I2C_FREQ_HZ     400000 
+
+
+  // common for 128x64 modules (sometimes 0x3D)
+#define OLED_WIDTH             128
+#define OLED_HEIGHT            64
+// #define OLED_SCL_HZ            400000
+#define OLED_RST_GPIO          -1     // set GPIO if you wired RST, else -1
+
+
+#define MCP4725_ADDR_7B     0x60   
+#define PCF8574DWR_ADDR_7B  0x20   
+#define OLED_I2C_ADDR       0x3C 
+
+
+#define POLLING_DELAY       100
+
+
+
 typedef struct {
     float kp;
     float ki;
@@ -32,8 +54,8 @@ typedef struct {
 } PIDConfig_t;
 
 
-static const PIDConfig_t DEFAULT_PID = {
-    .kp = 2.0f,
-    .ki = 1.0f,
-    .kd = 2.0f
-};
+// static const PIDConfig_t DEFAULT_PID = {
+//     .kp = 2.0f,
+//     .ki = 1.0f,
+//     .kd = 2.0f
+// };

@@ -5,11 +5,10 @@
 #include "driver/usb_serial_jtag.h"
 
 #include "config.h"
-#include "usb_comm.h"
 
 
 QueueHandle_t usb_queue;
-PIDConfig_t pid_config = DEFAULT_PID;
+PIDConfig_t* pid_config;
 
 static const char *TAG = "USB";
 
@@ -31,7 +30,7 @@ void usb_input_task() {
     char line_buffer[256];
     int line_pos = 0;
     
-    ESP_LOGI(TAG, "Input task started");
+    ESP_LOGI(TAG, "Usb input task starting...");
     // printf(">>> \n");
     // fflush(stdout);
     
@@ -52,14 +51,14 @@ void usb_input_task() {
                         // Parse command
                         float kp, ki, kd;
                         if (sscanf(line_buffer, "%f %f %f", &kp, &ki, &kd) == 3) {
-                            pid_config.kp = kp;
-                            pid_config.ki = ki;
-                            pid_config.kd = kd;
+                            pid_config->kp = kp;
+                            pid_config->ki = ki;
+                            pid_config->kd = kd;
                             
                             ESP_LOGI(TAG, "Config received: Kp=%.4f Ki=%.4f Kd=%.4f", 
                                      kp, ki, kd);
 
-                            xQueueSend(usb_queue,&pid_config, portMAX_DELAY);
+                            // xQueueSend(usb_queue,&pid_config, portMAX_DELAY);
                             
                         } else {
                             ESP_LOGW(TAG, "Invalid input: %s", line_buffer);
@@ -82,15 +81,16 @@ void usb_input_task() {
 }
 
 
-void usb_comm_init() {
+void usb_comm_init(PIDConfig_t* config) {
 
-    usb_queue = xQueueCreate(10, sizeof(PIDConfig_t));
+    // usb_queue = xQueueCreate(10, sizeof(PIDConfig_t));
+    pid_config = config;
 
     usb_jtag_init();
     ESP_LOGI(TAG, "USB JTAG configured");
 
 
-    usb_input_task();
+    // xTaskCreate(usb_input_task, "USB Comm Task", 4096, NULL, 10, NULL);
     ESP_LOGI(TAG, "USB input started");
 
 }

@@ -28,7 +28,7 @@ pid_outputs = deque(maxlen=MAX_POINTS)
 integrals = deque(maxlen=MAX_POINTS)
 
 # PID coefficients
-kp, ki, kd = 0.002, 0.001, 0.001
+kp, ki, kd = 2, 1, 2
 initial_values_loaded = False
 
 # Initialize serial connection
@@ -43,7 +43,7 @@ ax2 = fig_plot.add_subplot(2, 1, 2)  # PID plot
 fig_control = plt.figure(figsize=(8, 2))
 fig_control.canvas.manager.set_window_title('PID Control Panel')
 
-ax1.set_ylim(1500, 2900)
+ax1.set_ylim(0, 1)
 ax2.set_ylim(-1.0, 1.0)
 
 
@@ -194,12 +194,14 @@ def parse_line(line):
             print(f"Initial PID loaded: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
             return None, None, None, None
 
+    # print(line)
     # Extract A (Actual)
-    match_actual = re.search(r'A:\s*([\d.]+)', line)
+    match_actual = re.search(r'A:\s*([-\d.]+)', line)
+    # print(match_actual)
     actual = float(match_actual.group(1)) if match_actual else None
 
     # Extract D (Desired)
-    match_desired = re.search(r'D:\s*([\d.]+)', line)
+    match_desired = re.search(r'D:\s*([-\d.]+)', line)
     desired = float(match_desired.group(1)) if match_desired else None
 
     # Extract I (Integral)
@@ -232,7 +234,7 @@ def update_plot(frame):
                     timestamps.append(sample_count)
                     actual_values.append(actual)
                     desired_values.append(desired)
-                    integrals.append(integral / 100 if integral else 0)
+                    integrals.append(integral if integral else 0)
                     pid_outputs.append(pid if pid else 0)
 
                     sample_count += 1

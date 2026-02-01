@@ -1,6 +1,4 @@
-// adc.h - Minimal public interface
-#ifndef ADC_H
-#define ADC_H
+#pragma once
 
 
 typedef struct {
@@ -11,4 +9,3 @@ typedef struct {
 void adc_start();
 ValvePositionData_t get_adc_values();
 
-#endif
