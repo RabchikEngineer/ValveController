@@ -1,16 +1,14 @@
 #include "esp_log.h"
-
 #include "freertos/FreeRTOS.h"
-
 #include "driver/usb_serial_jtag.h"
 
 #include "config.h"
-
+#include "params.h"
 
 QueueHandle_t usb_queue;
-PIDConfig_t* pid_config;
 
 static const char *TAG = "USB";
+
 
 
 void usb_jtag_init() {
@@ -25,7 +23,7 @@ void usb_jtag_init() {
 
 
 
-void usb_input_task() {
+void usb_input_task(params_t* params) {
     uint8_t buffer[256];
     char line_buffer[256];
     int line_pos = 0;
@@ -51,9 +49,9 @@ void usb_input_task() {
                         // Parse command
                         float kp, ki, kd;
                         if (sscanf(line_buffer, "%f %f %f", &kp, &ki, &kd) == 3) {
-                            pid_config->kp = kp;
-                            pid_config->ki = ki;
-                            pid_config->kd = kd;
+                            params->kp = kp;
+                            params->ki = ki;
+                            params->kd = kd;
                             
                             ESP_LOGI(TAG, "Config received: Kp=%.4f Ki=%.4f Kd=%.4f", 
                                      kp, ki, kd);
@@ -81,17 +79,15 @@ void usb_input_task() {
 }
 
 
-void usb_comm_init(PIDConfig_t* config) {
+void usb_comm_init() {
 
-    // usb_queue = xQueueCreate(10, sizeof(PIDConfig_t));
-    pid_config = config;
 
     usb_jtag_init();
     ESP_LOGI(TAG, "USB JTAG configured");
 
 
     // xTaskCreate(usb_input_task, "USB Comm Task", 4096, NULL, 10, NULL);
-    ESP_LOGI(TAG, "USB input started");
+    // ESP_LOGI(TAG, "USB input started");
 
 }
 

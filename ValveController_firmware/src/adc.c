@@ -158,7 +158,7 @@ void adc_start() {
     continuous_adc_init(channels, sizeof(channels) / sizeof(adc_channel_t), &adc_handle);
     ESP_LOGI(TAG, "ADC configured");
 
-    xTaskCreate(adc_continuous_read_task, "ADC reading", 8192, NULL, 10, NULL);
+    xTaskCreate(adc_continuous_read_task, "ADC reading", 8192, NULL, 9, NULL);
     ESP_LOGI(TAG, "ADC started");
 
 }

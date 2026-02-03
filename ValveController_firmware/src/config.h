@@ -3,7 +3,6 @@
 #define VALVE_DEC_PIN 1 
 #define ACTUAL_POSITION_PIN     ADC_CHANNEL_3
 #define DESIRED_POSITION_PIN    ADC_CHANNEL_4
-// #define OUTPUT_PERCENT_PIN 2
 
 
 #define ADC_RESULT_BYTE         4  // ESP32-C3 specific
@@ -31,7 +30,6 @@
 #define I2C_FREQ_HZ     400000 
 
 
-  // common for 128x64 modules (sometimes 0x3D)
 #define OLED_WIDTH             128
 #define OLED_HEIGHT            64
 // #define OLED_SCL_HZ            400000
@@ -43,19 +41,12 @@
 #define OLED_I2C_ADDR       0x3C 
 
 
-#define POLLING_DELAY       100
+#define POLLING_DELAY       1000
 
-
-
-typedef struct {
-    float kp;
-    float ki;
-    float kd;
-} PIDConfig_t;
-
-
-// static const PIDConfig_t DEFAULT_PID = {
-//     .kp = 2.0f,
-//     .ki = 1.0f,
-//     .kd = 2.0f
-// };
+// UI SETTINGS
+#define DEBOUNCE_MS        30
+#define LONG_PRESS_MS      1000
+#define REPEAT_START_MS    2000
+#define REPEAT_INTERVAL_MS 100
+#define ACTIVITY_TIMEOUT_US (60 * 1000000LL)
+#define LOCK_COMBO_TIME_US  (2 * 1000000LL)
