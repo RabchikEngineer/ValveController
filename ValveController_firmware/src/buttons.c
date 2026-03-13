@@ -26,7 +26,7 @@ static uint8_t read_pcf(void)
     return val;
 }
 
-static void read_buttons_task(void *arg)
+void read_buttons_task()
 {
     uint8_t last_raw = 0xFF;
     uint8_t stable   = 0xFF;
@@ -96,12 +96,20 @@ static void read_buttons_task(void *arg)
     }
 }
 
-void read_buttons_init(void *pcf_handle, int int_gpio)
+TaskHandle_t* button_reader_init(void *pcf_handle)
 {
     s_pcf_handle = pcf_handle;
     g_button_queue = xQueueCreate(16, sizeof(button_event_t));
 
-    xTaskCreate(read_buttons_task, "input", 3072, NULL, 10, &s_input_task);
+    // xTaskCreate(read_buttons_task, "input", 3072, NULL, 7, &s_input_task);
+
+    ESP_LOGI(TAG,"Buttons half-inited, needs for ISR installation");
+
+    return &s_input_task;
+
+}
+
+void button_reader_install_isr(int int_gpio) {
 
     // GPIO INT set up 
     gpio_config_t io_cfg = {
@@ -114,5 +122,7 @@ void read_buttons_init(void *pcf_handle, int int_gpio)
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     ESP_ERROR_CHECK(gpio_isr_handler_add(int_gpio, int_isr, NULL));
 
-    ESP_LOGI(TAG, "Input initialized (INT GPIO %d)", int_gpio);
+    ESP_LOGI(TAG, "Buttons ISR initialized (INT GPIO %d)", int_gpio);
+
 }
+

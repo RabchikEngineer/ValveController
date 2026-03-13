@@ -101,7 +101,7 @@ void render_clear(void)
     s_dirty_pages = 0xFF;
 }
 
-void render_text(uint8_t page, uint8_t col, const char *str, bool invert)
+void render_text(uint8_t page, uint8_t col, const char* str,bool invert)
 {
     if (page >= PAGES) return;
     uint8_t x = col;
@@ -118,6 +118,28 @@ void render_text(uint8_t page, uint8_t col, const char *str, bool invert)
     }
     s_dirty_pages |= (1 << page);
 }
+
+
+#ifndef RENDER_TEXTF_BUF_SZ
+#define RENDER_TEXTF_BUF_SZ 64
+#endif
+
+// Optional: lets GCC check printf-like format/args at compile time.
+void render_textf(uint8_t page, uint8_t col, bool invert, const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));  // fmt is 4th arg, "..." starts at 5th
+
+void render_textf(uint8_t page, uint8_t col, bool invert, const char *fmt, ...)
+{
+    char buf[RENDER_TEXTF_BUF_SZ];
+
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    render_text(page, col, buf, invert);
+}
+
 
 void render_text_large(uint8_t page, uint8_t col, const char *str)
 {

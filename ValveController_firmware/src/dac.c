@@ -1,15 +1,19 @@
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 
 #include "dac.h"
+#include "params.h"
 
+static const char* TAG = "DAC";
 
 
 static inline uint8_t clamp_pd(uint8_t pd)    { return pd & 0x03; }
 static inline uint16_t clamp_code(uint16_t c) { return c & 0x0FFF; }
 
-static void* s_dac_handler = NULL;
+static i2c_master_dev_handle_t s_dac_handler = NULL;
+QueueHandle_t current_loop_queue;
 
 // Fast mode write (C2=0,C1=0,C0=don't care): 2 bytes after address.
 // Byte0 = [PD1 PD0 D11 D10 D9 D8], Byte1 = [D7..D0]. [file:1]
@@ -22,6 +26,7 @@ int mcp4725_write_fast(uint16_t code12, uint8_t pd_bits, int timeout_ms)
     uint8_t buf[2];
     buf[0] = (uint8_t)((pd_bits << 4) | ((code12 >> 8) & 0x0F));
     buf[1] = (uint8_t)(code12 & 0xFF);
+    // ESP_LOGI(TAG, "Send %d or %d to dac", code12, buf[1]);
 
     return i2c_master_transmit(s_dac_handler, buf, sizeof(buf), timeout_ms);
 }
@@ -49,17 +54,20 @@ int mcp4725_write_eeprom(uint16_t code12, uint8_t pd_bits, int timeout_ms)
 
 void current_loop_output_task() {
 
-    int current_loop_value; // 0-1 
-    uint8_t dac_value;
+    float current_loop_value; // 0-1 
+    float dac_value;
 
     while (1) {
 
         if (xQueueReceive(current_loop_queue, &current_loop_value, portMAX_DELAY) == pdTRUE) {
 
 
-            dac_value=current_loop_value; // should be calculation
 
-            mcp4725_write_fast(dac_value,0x00,100);
+            dac_value=apply_calibration(g_calibration.current_loop_approx, current_loop_value); // should be calculation
+
+            ESP_LOGI(TAG, "DAC value after calc: %f -> %f", (double)current_loop_value, (double)dac_value);
+
+            mcp4725_write_fast((uint16_t)dac_value,0x00,100);
         }
 
         
@@ -70,8 +78,9 @@ void current_loop_output_task() {
 // mcp4725_write_fast(i2c_periphery.dac,(uint16_t)(current_loop_value),0x00,100);
 
 
-void current_loop_init() {
+void current_loop_init(i2c_master_dev_handle_t dac_handle) {
 
+    s_dac_handler=dac_handle;
     current_loop_queue = xQueueCreate(1, sizeof(float));
 
 }

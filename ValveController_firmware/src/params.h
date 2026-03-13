@@ -30,20 +30,26 @@ typedef struct {
 } calibration_data_t;
 
 // Global params instance
-extern params_t g_params;
-extern calibration_data_t g_calibration;
+volatile extern params_t g_params;
+volatile extern calibration_data_t g_calibration;
 
 // Initialize from NVS
 void nvs_init();
-void params_load(void);
+void config_load(void);
 
 // Save to NVS
-void params_save(void);
+void config_save(void);
 
 // Setters with validation
-void params_set_kp(float val);
-void params_set_ki(float val);
-void params_set_kd(float val);
-void params_set_deadzone(float val);
-void params_set_pwm_freq(uint32_t val);
-void params_set_ema_alpha(float val);
+void config_set_kp(float val);
+void config_set_ki(float val);
+void config_set_kd(float val);
+void config_set_deadzone(float val);
+void config_set_pwm_freq(uint32_t val);
+void config_set_ema_alpha(float val);
+void calibration_set_actual_position(approx_poly_line_t p);
+void calibration_set_desired_position(approx_poly_line_t p);
+void calibration_set_current_loop(approx_poly_line_t p);
+
+// Function to calculate true value
+float apply_calibration(approx_poly_line_t polyline, float raw_value);

@@ -23,8 +23,9 @@ typedef struct {
     button_event_type_t event;
 } button_event_t;
 
-// Очередь событий кнопок (создаётся в read_buttons_init)
+
 extern QueueHandle_t g_button_queue;
 
-// pcf_handle - из твоего main.c; int_gpio - GPIO10
-void read_buttons_init(void *pcf_handle, int int_gpio);
+TaskHandle_t* button_reader_init(void *pcf_handle);
+void button_reader_install_isr(int int_gpio);
+void read_buttons_task();

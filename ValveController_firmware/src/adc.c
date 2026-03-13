@@ -7,28 +7,39 @@
 
 #include "config.h"
 #include "adc.h"
+#include "params.h"
 
 static const char *TAG = "ADC";
 
 
 static volatile float latest_actual_position = 0.0f;
 static volatile float latest_desired_position = 0.0f;
+static bool s_desired_position_override;
+static float s_desired_position_override_value;
 
 static adc_channel_t channels[2] = {ACTUAL_POSITION_PIN, DESIRED_POSITION_PIN};
 static adc_continuous_handle_t adc_handle = NULL;
 
 
-float test_desired_data[200] = {
-    1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
-    2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 
-    2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 
-    2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 
-    1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
-    2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 
-    1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
-    2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000};
+// float test_desired_data[200] = {
+//     1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
+//     2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 
+//     2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 
+//     2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 
+//     1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
+//     2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 
+//     1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 
+//     2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000};
 
 
+
+void set_desired_position_override(bool enabled) {
+    s_desired_position_override=enabled;
+}
+
+void set_desired_position_override_value(float value) {
+    s_desired_position_override_value=value;
+}
 
 
 
@@ -78,7 +89,7 @@ void adc_continuous_read_task(void *arg) {
     uint32_t ret_num = 0;
     esp_err_t ret;
 
-    int test_pos=0;
+    // int test_pos=0;
     
     // Start continuous conversion
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
@@ -111,12 +122,11 @@ void adc_continuous_read_task(void *arg) {
                     }
                 }
             }
-            
-            
-            latest_actual_position = latest_actual_position*(1-EMA_WEIGHT)+((float)sum_ch3 / (float)count_ch3)*EMA_WEIGHT;
-            
 
+            
+            latest_actual_position =  latest_actual_position* (1-EMA_WEIGHT)+((float)sum_ch3 / (float)count_ch3)*EMA_WEIGHT;
             latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+((float)sum_ch4 / (float)count_ch4)*EMA_WEIGHT;
+
             // latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+test_desired_data[test_pos/4]*EMA_WEIGHT;
             // test_pos++;
             // if (test_pos>=200*4) {
@@ -143,12 +153,24 @@ void adc_continuous_read_task(void *arg) {
 }
 
 
-ValvePositionData_t get_adc_values() {
+ValvePositionData_t get_calibrated_adc_values() {
+    if (s_desired_position_override) {
+        latest_desired_position = s_desired_position_override_value;
+    }
+    ValvePositionData_t data = {
+        .desiredPositionPercent=s_desired_position_override ? s_desired_position_override_value : 
+                                apply_calibration(g_calibration.desired_position_approx, latest_desired_position),
+        .actualPositionPercent=apply_calibration(g_calibration.actual_position_approx, latest_actual_position)
+    }; 
+    
+    return data;
+}
+
+ValvePositionData_t get_raw_adc_values() {
     ValvePositionData_t data = {
         .desiredPositionPercent=latest_desired_position,
         .actualPositionPercent=latest_actual_position
     }; 
-    
     return data;
 }
 
