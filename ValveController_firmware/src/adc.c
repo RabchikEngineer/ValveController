@@ -14,8 +14,8 @@ static const char *TAG = "ADC";
 
 static volatile float latest_actual_position = 0.0f;
 static volatile float latest_desired_position = 0.0f;
-static bool s_desired_position_override;
-static float s_desired_position_override_value;
+static bool s_desired_position_override=false;
+static float s_desired_position_override_value=0;
 
 static adc_channel_t channels[2] = {ACTUAL_POSITION_PIN, DESIRED_POSITION_PIN};
 static adc_continuous_handle_t adc_handle = NULL;
@@ -89,6 +89,8 @@ void adc_continuous_read_task(void *arg) {
     uint32_t ret_num = 0;
     esp_err_t ret;
 
+    ESP_LOGI(TAG, "adc_continuous_read_task started");
+
     // int test_pos=0;
     
     // Start continuous conversion
@@ -126,6 +128,7 @@ void adc_continuous_read_task(void *arg) {
             
             latest_actual_position =  latest_actual_position* (1-EMA_WEIGHT)+((float)sum_ch3 / (float)count_ch3)*EMA_WEIGHT;
             latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+((float)sum_ch4 / (float)count_ch4)*EMA_WEIGHT;
+            // ESP_LOGI(TAG, "%f", (double)latest_actual_position);
 
             // latest_desired_position = latest_desired_position*(1-EMA_WEIGHT)+test_desired_data[test_pos/4]*EMA_WEIGHT;
             // test_pos++;
@@ -144,6 +147,7 @@ void adc_continuous_read_task(void *arg) {
         }
         
         // Small delay to prevent watchdog timeout
+        // ESP_LOGW(TAG, "Adc timer:%lld", esp_timer_get_time());
         vTaskDelay(pdMS_TO_TICKS(1));
     }
     
@@ -179,9 +183,6 @@ void adc_start() {
 
     continuous_adc_init(channels, sizeof(channels) / sizeof(adc_channel_t), &adc_handle);
     ESP_LOGI(TAG, "ADC configured");
-
-    xTaskCreate(adc_continuous_read_task, "ADC reading", 8192, NULL, 9, NULL);
-    ESP_LOGI(TAG, "ADC started");
 
 }
 

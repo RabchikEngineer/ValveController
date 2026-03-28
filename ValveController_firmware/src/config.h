@@ -1,3 +1,4 @@
+#pragma once
 
 #define VALVE_INC_PIN 0 
 #define VALVE_DEC_PIN 1 
@@ -5,8 +6,12 @@
 #define DESIRED_POSITION_PIN    ADC_CHANNEL_4
 
 
-#define ADC_RESULT_BYTE         4  // ESP32-C3 specific
-#define SAMPLE_FREQ_HZ          5000  // 5 kHz sampling
+// adc polling freq calculation: SAMPLE_FREQ_HZ/(READ_LEN/ADC_RESULT_BYTE)/2
+// 5kHz - 4.88 Hz
+// 10kHz - 9.76 Hz
+// 20kHz - 19.53 Hz
+#define ADC_RESULT_BYTE         SOC_ADC_DIGI_RESULT_BYTES  // ESP32-C3 specific
+#define SAMPLE_FREQ_HZ          25000
 #define BUFFER_SIZE             2048   // Must be multiple of ADC_RESULT_BYTE
 #define READ_LEN                2048
 #define ADC_UNIT                ADC_UNIT_1
@@ -27,7 +32,8 @@
 #define I2C_PORT        0
 #define I2C_SDA_GPIO    8      
 #define I2C_SCL_GPIO    9
-#define I2C_FREQ_HZ     400000 
+#define I2C_FREQ_HZ     400000
+#define I2C_RESPONSE_TIMEOUT_MS 100  
 
 
 #define OLED_WIDTH             128
@@ -36,12 +42,13 @@
 #define OLED_RST_GPIO          -1     // set GPIO if you wired RST, else -1
 
 
-#define MCP4725_ADDR_7B     0x60   
-#define PCF8574DWR_ADDR_7B  0x20   
+#define MCP4725_I2C_ADDR     0x60   
+#define PCF8574DWR_I2C_ADDR  0x20   
 #define OLED_I2C_ADDR       0x3C 
 
 
-#define POLLING_DELAY       1000
+#define POLLING_DELAY       30
+#define VALVE_IDLE_DELAY    0
 
 // UI SETTINGS
 #define DEBOUNCE_MS        30
@@ -51,4 +58,14 @@
 #define ACTIVITY_TIMEOUT_US (60 * 1000000LL)
 #define LOCK_COMBO_TIME_US  (2 * 1000000LL)
 #define SCREEN_FPS          10
-#define UI_CYCLE_DELAY      20
+#define UI_CYCLE_FPS      50
+
+
+// calibration settings
+#define MAX_CAL_POINTS      5
+#define CAL_MIN_AP_DELTA    5
+#define CAL_MIN_DP_DELTA    5
+#define CAL_MIN_CL_DELTA    5
+#define CAL_CONFIRM_WAIT_TIME_MS 30000
+#define CAL_DP_SET_VALUE_WAIT_TIME_MS 30000
+#define CAL_CL_GET_VALUE_WAIT_TIME_MS 30000

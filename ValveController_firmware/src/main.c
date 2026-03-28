@@ -54,25 +54,16 @@ typedef struct {
 
 
 QueueHandle_t inputQueue;
-QueueHandle_t outputQueue;
+QueueHandle_t output_queue;
 
 
 static i2c_periphery_t i2c_periphery;
 
-
-const TickType_t polling_delay = pdMS_TO_TICKS(POLLING_DELAY);
-// const float PID_ATTENUATION = 1000.0f; // so that we can use higher Kp,Ki,Kd
-const float PID_ATTENUATION = 1.0f; // so that we can use higher Kp,Ki,Kd
+static TaskHandle_t s_polling_task_handle;
 
 
-volatile bool led_state = 0;
+volatile float valve_activation_threshold = 0.2; //for -1 --- 1 pid output
 
-volatile float valve_activation_threshold = 0.17; //for -1 --- 1 pid output
-
-
-//zone in which integral doesnt calculates, so the system ceases to stabilize
-//so accuracy shold be 20/4096=0.5%
-float dead_zone_size = 0.01; 
 
 
 PWMConfig_t pwm_10_hz_config = {
@@ -90,7 +81,7 @@ PWMConfig_t pwm_2_hz_config = {
     .resolution = 14
 };
 
-
+PWMConfig_t pwm_config;
 
 
 
@@ -124,18 +115,18 @@ void i2c_bus_destroy(i2c_master_bus_handle_t bus)
 //     ESP_ERROR_CHECK(i2c_master_bus_rm_device((i2c_master_dev_handle_t)dev));
 // }
 
-int i2c_bus_probe(i2c_master_bus_handle_t bus, uint16_t addr_7bit, int timeout_ms)
-{
-    if (!bus) return -1;
-    return i2c_master_probe(bus, addr_7bit, timeout_ms);
-}
+// int i2c_bus_probe(i2c_master_bus_handle_t bus, uint16_t addr_7bit, int timeout_ms)
+// {
+//     if (!bus) return -1;
+//     return i2c_master_probe(bus, addr_7bit, timeout_ms);
+// }
 
 
 void i2c_periphery_init(i2c_periphery_t* i2c_periphery) {
 
     i2c_device_config_t dac_dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = MCP4725_ADDR_7B,
+        .device_address = MCP4725_I2C_ADDR,
         .scl_speed_hz = I2C_FREQ_HZ,
     };
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_periphery->bus, &dac_dev_cfg, &i2c_periphery->dac));
@@ -143,7 +134,7 @@ void i2c_periphery_init(i2c_periphery_t* i2c_periphery) {
 
     i2c_device_config_t pcf_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = PCF8574DWR_ADDR_7B,
+        .device_address = PCF8574DWR_I2C_ADDR,
         .scl_speed_hz = I2C_FREQ_HZ,
     };
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_periphery->bus, &pcf_cfg, &i2c_periphery->pcf));
@@ -216,29 +207,45 @@ void valve_pwm_init(PWMConfig_t* config) {
 
 
 
+void suspend_polling() {
+    vTaskSuspend(s_polling_task_handle);
+    ESP_LOGI(TAG, "Suspended polling task");
+}
 
+void resume_polling() {
+    vTaskResume(s_polling_task_handle);
+    ESP_LOGI(TAG, "Resumed polling task");
+}
 
 
 void polling_task() {
     ValvePositionData_t data;
-    TickType_t last_wake_time = xTaskGetTickCount();
+    // TickType_t last_wake_time = xTaskGetTickCount();
+    cl_set_output cl_val;
     while (1) {
 
         data = get_calibrated_adc_values();
 
         
+        if (data.actualPositionPercent>1) {data.actualPositionPercent=1;}
+        if (data.actualPositionPercent<0) {data.actualPositionPercent=0;}
+        if (data.desiredPositionPercent>1) {data.desiredPositionPercent=1;}
+        if (data.desiredPositionPercent<0) {data.desiredPositionPercent=0;}
+
         // data.desiredPositionPercent=(data.desiredPositionPercent-705)/(3590-705);
         // data.actualPositionPercent=(data.actualPositionPercent-1560)/(2480-1560);
 
         // Send to PID task
         xQueueSend(inputQueue, &data, 100);
-        xQueueSend(current_loop_queue, &data.actualPositionPercent, 100);
+        cl_val=(cl_set_output){.value=data.actualPositionPercent, .is_raw=false};
+        xQueueSend(current_loop_queue, &cl_val, 100);
 
         // ESP_LOGI(TAG,"%d",(uint16_t)(data.actualPositionPercent*(1<<12)));
         // ESP_LOGI(TAG,"%d",((uint16_t)(data.actualPositionPercent*(1<<12)) & 0x0FFF));
 
-        ESP_LOGI(TAG, "Polled successfully");
-        xTaskDelayUntil(&last_wake_time,polling_delay); 
+        // ESP_LOGI(TAG, "Polled successfully");
+        // xTaskDelayUntil(&last_wake_time,polling_delay); 
+        vTaskDelay(pdMS_TO_TICKS(POLLING_DELAY));
     }
 }
 
@@ -253,6 +260,8 @@ void PID_task() {
     float prev_error = 0.0f;
     float dt=0.1f;
     int64_t last_time=0;
+    float derivaitve_ema_alpha=0.8;
+    float derivative = 0;
 
     // float Kp = 0.004f;
     // float Ki = 0.001f; // работают но с перелётом
@@ -272,13 +281,13 @@ void PID_task() {
             dt = (current_time - last_time) / 1000000.0f; // calculating actual dt. however it might differs only for 1%
             last_time=current_time;
 
-            float derivative = (error - prev_error) / dt;
+            derivative = (derivative * (1- derivaitve_ema_alpha)) + ( (error - prev_error) / dt)*derivaitve_ema_alpha;
             prev_error = error;
 
-            pid_output = ((g_params.kp * error) + (g_params.ki * integral) + (g_params.kd * derivative)) / PID_ATTENUATION;
+            pid_output = ((g_config.kp * error) + (g_config.ki * integral) + (g_config.kd * derivative));
 
             bool saturated = (pid_output > 1.0f) || (pid_output < -1.0f);
-            bool in_dead_zone = (fabsf(error) < dead_zone_size); // doesnt calculate integral in small zone
+            bool in_dead_zone = (fabsf(error) < g_config.deadzone); // doesnt calculate integral in small zone
             // Only integrate if not saturated
             if (!saturated && !in_dead_zone) {
                 integral += error * dt;
@@ -289,15 +298,20 @@ void PID_task() {
                 integral *= 0.95f;
             } else if (in_dead_zone){
                 integral = 0;
+                // pid_output=0;
+            }
+
+            if (isnan(pid_output)) {
+                integral=0;
             }
 
 
             // Convert controlOutput to command for valves
-            // ESP_LOGI(TAG_PID, "Params P: %0.2f, I: %0.2f, D: %0.2f", g_params.kp, g_params.ki, g_params.kd);
+            // ESP_LOGI(TAG_PID, "Params P: %0.2f, I: %0.2f, D: %0.2f", g_config.kp, g_config.ki, g_config.kd);
             ESP_LOGI(TAG_PID, "A: %.3f/D: %.3f,I: %.3f , dt: %.5f, %.4f", 
                      receivedData.actualPositionPercent, receivedData.desiredPositionPercent, integral, dt, pid_output);
             // pid_output=0;
-            xQueueSend(outputQueue, &pid_output, portMAX_DELAY);
+            xQueueSend(output_queue, &pid_output, 100);
         }
     }
 }
@@ -314,7 +328,7 @@ void set_valve_pwm_task() {
     float pid_output=0;
     
     while (1) {
-        if (xQueueReceive(outputQueue, &pid_output, portMAX_DELAY) == pdPASS) {
+        if (xQueueReceive(output_queue, &pid_output, portMAX_DELAY) == pdPASS) {
 
 
             if (fabsf(pid_output)<valve_activation_threshold) { // dead zone near center
@@ -357,10 +371,10 @@ void set_valve_pwm_task() {
                 ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC, max_duty-duty_dec)); //inverting output max_duty-duty_dec
                 ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC));
                 
-                ESP_LOGI(TAG_VALVE, "PID: %.2f -> INC duty: %.2f, DEC duty: %.2f", 
-                        pid_output, (float)duty_inc/max_duty, (float)duty_dec/max_duty);
+                // ESP_LOGI(TAG_VALVE, "PID: %.2f -> INC duty: %.2f, DEC duty: %.2f", 
+                //         pid_output, (float)duty_inc/max_duty, (float)duty_dec/max_duty);
                 
-                disabled_until=now+pdMS_TO_TICKS(100);
+                disabled_until=now+pdMS_TO_TICKS(VALVE_IDLE_DELAY);
             }
         }
     }
@@ -374,18 +388,19 @@ void set_valve_pwm_task() {
 void app_main(void)
 {   
     
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    // vTaskDelay(pdMS_TO_TICKS(5000));
 
 
     ESP_LOGI(TAG,"Starting program");
 
     inputQueue = xQueueCreate(2, sizeof(ValvePositionData_t));
-    outputQueue = xQueueCreate(2, sizeof(float));
+    output_queue = xQueueCreate(2, sizeof(float));
 
     nvs_init();
     config_load();
+    calibration_load();
 
-    // printf("Current PID: %.6f %.6f %.6f\n", g_params.kp, g_params.ki, g_params.kd);
+    // printf("Current PID: %.6f %.6f %.6f\n", g_config.kp, g_config.ki, g_config.kd);
 
     // data_point_t* points[] = {{1,2},{2,4}};
     // // ApproxPoly_t input_approx = {3,points};
@@ -409,20 +424,46 @@ void app_main(void)
     i2c_periphery_init(&i2c_periphery);
     ESP_LOGI(TAG,"I2C init completed");
 
+    bool i2c_devices_ok=false;
+    while (!i2c_devices_ok) {
+        i2c_devices_ok = true;
+        if (i2c_master_probe(i2c_periphery.bus, OLED_I2C_ADDR, I2C_RESPONSE_TIMEOUT_MS)!=ESP_OK) {
+            ESP_LOGE(TAG, "Panel doesn't responding");
+            i2c_devices_ok=false;
+        }
+        if (i2c_master_probe(i2c_periphery.bus, MCP4725_I2C_ADDR, I2C_RESPONSE_TIMEOUT_MS)!=ESP_OK) {
+            ESP_LOGE(TAG, "DAC doesn't responding");
+            i2c_devices_ok=false;
+        }
+        if (i2c_master_probe(i2c_periphery.bus, PCF8574DWR_I2C_ADDR, I2C_RESPONSE_TIMEOUT_MS)!=ESP_OK) {
+            ESP_LOGE(TAG, "PCF doesnt responding");
+            i2c_devices_ok=false;
+        }
+        if (!i2c_devices_ok) {vTaskDelay(pdMS_TO_TICKS(1000));}
+
+    }
+
+    pwm_config = pwm_10_hz_config;
+    pwm_config.frequency = g_config.pwm_freq_hz;
 
 
-    valve_pwm_init(&pwm_10_hz_config);
+    valve_pwm_init(&pwm_config);
     ESP_LOGI(TAG, "PWM configured");
 
+    // set 21 gpio to high
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << 21),     
+        .mode = GPIO_MODE_OUTPUT,            // Set as output
+        .pull_up_en = GPIO_PULLUP_DISABLE,  // Disable pull-up
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,  // Disable pull-down
+        .intr_type = GPIO_INTR_DISABLE             // Disable interrupts
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(21,1);  //safety logic disable
 
     
-
-    
-    
-    usb_comm_init(&g_params);
+    usb_comm_init();
     ESP_LOGI(TAG, "USB input configured");
-
-
 
 
     ESP_LOGI(TAG, "Starting tasks...");
@@ -431,26 +472,39 @@ void app_main(void)
 
     current_loop_init(i2c_periphery.dac);
 
-    TaskHandle_t* read_buttons_task_handler = button_reader_init(i2c_periphery.pcf);
-    TaskHandle_t polling_task_handler=NULL;
     
-    xTaskCreate(polling_task, "Polling Task", 2048, NULL, 7, &polling_task_handler);
-    xTaskCreate(PID_task, "PID Task", 4096, NULL, 8, NULL);
-    xTaskCreate(set_valve_pwm_task, "PWM&Output Task", 2048, NULL, 9, NULL);
-    xTaskCreate(usb_input_task, "USB task", 4096, NULL, 5, NULL);
-    xTaskCreate(current_loop_output_task, "Current loop task", 2048, NULL, 9, NULL);
-    xTaskCreate(read_buttons_task,"Buttons task", 2048, NULL, 7, read_buttons_task_handler);
-    ESP_LOGI(TAG, "Tasks started...");
 
+    TaskHandle_t* read_buttons_task_handler = button_reader_init(i2c_periphery.pcf);
+    
+    xTaskCreate(adc_continuous_read_task, "adc_read_task", 8192, NULL, 9, NULL);
+    xTaskCreate(polling_task, "polling_task", 2048, NULL, 7, &s_polling_task_handle);
+    xTaskCreate(PID_task, "PID_task", 4096, NULL, 8, NULL);
+    xTaskCreate(set_valve_pwm_task, "set_valve_pwm_task", 2048, NULL, 9, NULL);
+    xTaskCreate(usb_input_task, "usb_input_task", 4096, NULL, 5, NULL);
+    xTaskCreate(current_loop_output_task, "current_loop_output_task", 4096, NULL, 9, NULL);
+    xTaskCreate(read_buttons_task,"read_buttons_task", 2048, NULL, 7, read_buttons_task_handler);
 
-    calibration_init(polling_task_handler,outputQueue);
+    calibration_init(output_queue);
+    xTaskCreate(calibration_task, "calibration_task", 4096, NULL, 8, NULL);
+
 
     button_reader_install_isr(10);
 
-    
     ui_init(i2c_periphery.panel);
     xTaskCreate((TaskFunction_t)ui_run, "ui", 4096, NULL, 5, NULL);
+    
 
+    ESP_LOGI(TAG, "Tasks started...");
+
+    // char testbuf[1000]={};
+
+    // while (1) {
+    //     vTaskGetRunTimeStats(testbuf);
+
+    //     ESP_LOGI(TAG, "%s",testbuf);
+
+    //     vTaskDelay(pdMS_TO_TICKS(10000));
+    // }
         
 
 

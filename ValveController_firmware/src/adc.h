@@ -7,6 +7,7 @@ typedef struct {
 } ValvePositionData_t;
 
 void adc_start();
+void adc_continuous_read_task();
 
 ValvePositionData_t get_calibrated_adc_values();
 ValvePositionData_t get_raw_adc_values();

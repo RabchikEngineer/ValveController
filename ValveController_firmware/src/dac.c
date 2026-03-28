@@ -54,19 +54,24 @@ int mcp4725_write_eeprom(uint16_t code12, uint8_t pd_bits, int timeout_ms)
 
 void current_loop_output_task() {
 
-    float current_loop_value; // 0-1 
+    cl_set_output current_loop_value; // 0-1 
     float dac_value;
 
     while (1) {
 
         if (xQueueReceive(current_loop_queue, &current_loop_value, portMAX_DELAY) == pdTRUE) {
+            
+            if (current_loop_value.is_raw==true) {
+                dac_value = current_loop_value.value;
+                // ESP_LOGI(TAG, "Using raw");
+            } else {
+                dac_value=apply_calibration(g_calibration.current_loop_approx, current_loop_value.value);
+                // ESP_LOGI(TAG, "Using calibration");
+            }
 
 
-
-            dac_value=apply_calibration(g_calibration.current_loop_approx, current_loop_value); // should be calculation
-
-            ESP_LOGI(TAG, "DAC value after calc: %f -> %f", (double)current_loop_value, (double)dac_value);
-
+            // ESP_LOGI(TAG, "DAC value after calc: %0.3f -> %0.3f", current_loop_value.value, dac_value);
+            
             mcp4725_write_fast((uint16_t)dac_value,0x00,100);
         }
 
@@ -81,6 +86,8 @@ void current_loop_output_task() {
 void current_loop_init(i2c_master_dev_handle_t dac_handle) {
 
     s_dac_handler=dac_handle;
-    current_loop_queue = xQueueCreate(1, sizeof(float));
+    current_loop_queue = xQueueCreate(1, sizeof(cl_set_output));
+
+    ESP_LOGI(TAG, "DAC configured");
 
 }

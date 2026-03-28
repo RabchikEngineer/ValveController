@@ -18,7 +18,7 @@ matplotlib.use('qt5agg')
 SERIAL_PORTS = ['/dev/ttyACM0','/dev/ttyACM1']  # Change to your port (Linux: /dev/ttyUSB0, Mac: /dev/cu.usbserial-*)
 current_port=0
 BAUD_RATE = 9600
-MAX_POINTS = 800  # Number of points to display
+MAX_POINTS = 200  # Number of points to display
 
 # Data storage
 timestamps = deque(maxlen=MAX_POINTS)
@@ -70,6 +70,7 @@ ax2.grid(True)
 sample_count = 0
 
 
+
 # Create sliders (use fig_control instead of plt.axes)
 slider_height = 0.1
 slider_left = 0.15
@@ -83,9 +84,9 @@ ax_kp = fig_control.add_axes([slider_left, slider_position, slider_width, slider
 ax_ki = fig_control.add_axes([slider_left, slider_position - slider_spacing, slider_width, slider_height])
 ax_kd = fig_control.add_axes([slider_left, slider_position - 2 * slider_spacing, slider_width, slider_height])
 
-slider_kp = Slider(ax_kp, 'Kp', 0.0, 5.0, valinit=kp, valstep=val_precision)
-slider_ki = Slider(ax_ki, 'Ki', 0.0, 5.0, valinit=ki, valstep=val_precision)
-slider_kd = Slider(ax_kd, 'Kd', 0.0, 5.0, valinit=kd, valstep=val_precision)
+slider_kp = Slider(ax_kp, 'Kp', 0.0, 10.0, valinit=kp, valstep=val_precision)
+slider_ki = Slider(ax_ki, 'Ki', 0.0, 10.0, valinit=ki, valstep=val_precision)
+slider_kd = Slider(ax_kd, 'Kd', 0.0, 10.0, valinit=kd, valstep=val_precision)
 
 # Create text boxes for manual entry
 textbox_left = slider_left + slider_width + 0.02
@@ -105,7 +106,7 @@ def send_pid_values():
     global ser, kp, ki, kd
     if ser is not None and ser.is_open:
         try:
-            message = f"{kp:.6f} {ki:.6f} {kd:.6f}\n"
+            message = f"set-pid {kp:.6f} {ki:.6f} {kd:.6f}\n"
             ser.write(message.encode())
             print(f"Sent to ESP32: Kp={kp:.6f}, Ki={ki:.6f}, Kd={kd:.6f}")
         except Exception as e:
@@ -221,6 +222,10 @@ def update_plot(frame):
     try:
         if ser is None:
             raise Exception("initial exception")
+
+        if sample_count%100==0:
+            print("Requesting pid values")
+            ser.write(f"get-pid\n".encode())
 
         if ser.in_waiting:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
