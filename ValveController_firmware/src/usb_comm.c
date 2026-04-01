@@ -62,7 +62,7 @@ static void process_usb_line(const char *line)
         fflush(stdout);
         return;
     }
-
+ 
     if (strcmp(line, "get-pid") == 0) {
         printf("Current PID: %.4f %.4f %.4f\n", g_config.kp, g_config.ki, g_config.kd);
         fflush(stdout);

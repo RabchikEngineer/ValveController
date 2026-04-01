@@ -70,7 +70,7 @@ typedef enum {
 
 
 static const char *main_menu_labels[MAIN_MENU_COUNT] = {
-    "Edit config", "Calibrate", "Manual control", "Version v1.1.1"
+    "Edit config", "Calibrate", "Manual control", "Version v1.1.2"
 };
 static const char *config_menu_labels[CONFIG_MENU_COUNT] = {
     "Kp", "Ki", "Kd", "Deadzone", "PWM Freq", "EMA Alpha"
@@ -522,8 +522,8 @@ static void render_menu()
                     case CONFIG_KP:        snprintf(line, sizeof(line), "  Kp: %.2f", g_config.kp); break;
                     case CONFIG_KI:        snprintf(line, sizeof(line), "  Ki: %.2f", g_config.ki); break;
                     case CONFIG_KD:        snprintf(line, sizeof(line), "  Kd: %.2f", g_config.kd); break;
-                    case CONFIG_DEADZONE:  snprintf(line, sizeof(line), "  DZ: %.3f", g_config.deadzone); break;
-                    case CONFIG_PWM_FREQ:  snprintf(line, sizeof(line), "  PWM: %luHz", (unsigned long)g_config.pwm_freq_hz); break;
+                    case CONFIG_DEADZONE:  snprintf(line, sizeof(line), "  DZ: %3.0f%%", g_config.deadzone*100); break;
+                    case CONFIG_PWM_FREQ:  snprintf(line, sizeof(line), "  PWM: %dHz", (int)g_config.pwm_freq_hz); break;
                     case CONFIG_EMA_ALPHA: snprintf(line, sizeof(line), "  EMA: %.2f", g_config.ema_alpha); break;
                     case CONFIG_RESET:     snprintf(line, sizeof(line), "  Reset values"); break;
                     default: snprintf(line, sizeof(line), "  ???"); break;
@@ -564,7 +564,7 @@ static void render_edit()
         case CONFIG_KP:        snprintf(val_str, sizeof(val_str), "%.2f", g_config.kp); break;
         case CONFIG_KI:        snprintf(val_str, sizeof(val_str), "%.2f", g_config.ki); break;
         case CONFIG_KD:        snprintf(val_str, sizeof(val_str), "%.2f", g_config.kd); break;
-        case CONFIG_DEADZONE:  snprintf(val_str, sizeof(val_str), "%.3f", g_config.deadzone); break;
+        case CONFIG_DEADZONE:  snprintf(val_str, sizeof(val_str), "%3.0f%%", g_config.deadzone*100); break;
         case CONFIG_PWM_FREQ:  snprintf(val_str, sizeof(val_str), "%d%%",   g_config.pwm_freq_hz*100); break;
         case CONFIG_EMA_ALPHA: snprintf(val_str, sizeof(val_str), "%.2f", g_config.ema_alpha); break;
         default: snprintf(val_str, sizeof(val_str), "???"); break;
