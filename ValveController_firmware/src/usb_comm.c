@@ -82,6 +82,26 @@ static void process_usb_line(const char *line)
         return;
     }
 
+
+    char cmd[15]={};   
+    if (sscanf(line, "set-log-level %14s", cmd) == 1) {
+        if (strcmp(cmd,"debug")==0) {
+            esp_log_level_set("*", ESP_LOG_DEBUG);
+        } else if (strcmp(cmd,"info")==0) {
+            esp_log_level_set("*", ESP_LOG_INFO);
+        } else if (strcmp(cmd,"warn")==0) {
+            esp_log_level_set("*", ESP_LOG_WARN);
+        } else if (strcmp(cmd,"error")==0) {
+            esp_log_level_set("*", ESP_LOG_ERROR);
+        } else {
+            ESP_LOGW(TAG, "Unknown log level: %s", cmd);
+            return;
+        }
+        ESP_LOGI(TAG, "new log level: %s", cmd);
+        return;
+    }
+    // esp_log_level_set("TAG", ESP_LOG_DEBUG)
+
     ESP_LOGW(TAG, "Invalid input: %s", line);
     printf("ERR: unknown command\n");
     fflush(stdout);

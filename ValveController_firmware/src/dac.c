@@ -26,7 +26,7 @@ int mcp4725_write_fast(uint16_t code12, uint8_t pd_bits, int timeout_ms)
     uint8_t buf[2];
     buf[0] = (uint8_t)((pd_bits << 4) | ((code12 >> 8) & 0x0F));
     buf[1] = (uint8_t)(code12 & 0xFF);
-    // ESP_LOGI(TAG, "Send %d or %d to dac", code12, buf[1]);
+    ESP_LOGV(TAG, "Send %d to dac", code12);
 
     return i2c_master_transmit(s_dac_handler, buf, sizeof(buf), timeout_ms);
 }
@@ -69,8 +69,11 @@ void current_loop_output_task() {
                 // ESP_LOGI(TAG, "Using calibration");
             }
 
+        
+            if (dac_value<0) {dac_value=0;}
+            if (dac_value>4095) {dac_value=4095;}
 
-            // ESP_LOGI(TAG, "DAC value after calc: %0.3f -> %0.3f", current_loop_value.value, dac_value);
+            ESP_LOGD(TAG, "DAC value after calc: %0.3f -> %0.3f", current_loop_value.value, dac_value);
             
             mcp4725_write_fast((uint16_t)dac_value,0x00,100);
         }

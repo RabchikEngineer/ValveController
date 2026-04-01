@@ -33,6 +33,7 @@ typedef enum {
     ENTER_CONFIG_MENU,
     ENTER_CALIBRATION_MENU,
     ENTER_MANUAL_CONTROL,
+    VERSION_INFO,
     MAIN_MENU_COUNT
 } main_menu_item_t;
 
@@ -69,7 +70,7 @@ typedef enum {
 
 
 static const char *main_menu_labels[MAIN_MENU_COUNT] = {
-    "Edit config", "Calibrate", "Manual control"
+    "Edit config", "Calibrate", "Manual control", "Version v1.1.1"
 };
 static const char *config_menu_labels[CONFIG_MENU_COUNT] = {
     "Kp", "Ki", "Kd", "Deadzone", "PWM Freq", "EMA Alpha"
@@ -510,6 +511,7 @@ static void render_menu()
                     case ENTER_CONFIG_MENU:        snprintf(line, sizeof(line), "  %s", main_menu_labels[0]); break;
                     case ENTER_CALIBRATION_MENU:   snprintf(line, sizeof(line), "  %s", main_menu_labels[1]); break;
                     case ENTER_MANUAL_CONTROL:     snprintf(line, sizeof(line), "  %s", main_menu_labels[2]); break;
+                    case VERSION_INFO:             snprintf(line, sizeof(line), "  %s", main_menu_labels[3]); break;
                     default: snprintf(line, sizeof(line), "  ???"); break;
                 }
                 break;
@@ -661,7 +663,7 @@ void ui_run(void)
 
         // Обработка событий кнопок (неблокирующая проверка)
         while (xQueueReceive(g_button_queue, &ev, 0) == pdTRUE) {
-            // ESP_LOGI(TAG, "Received %d on %d", ev.event, ev.button);
+            ESP_LOGV(TAG, "Received %d on %d", ev.event, ev.button);
             switch (s_state) {
                 case STATE_LOCKED:    handle_event_locked(&ev); break;
                 case STATE_MAIN_MENU: 

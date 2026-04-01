@@ -305,6 +305,13 @@ void PID_task() {
                 integral=0;
             }
 
+            if (receivedData.desiredPositionPercent<0.01f) {
+                pid_output=-1.0f;
+            }
+            if (receivedData.desiredPositionPercent>0.99f) {
+                pid_output=1.0f;
+            }
+
 
             // Convert controlOutput to command for valves
             // ESP_LOGI(TAG_PID, "Params P: %0.2f, I: %0.2f, D: %0.2f", g_config.kp, g_config.ki, g_config.kd);
@@ -323,7 +330,7 @@ void set_valve_pwm_task() {
     uint32_t duty_inc = 0;
     uint32_t duty_dec = 0;
 
-    TickType_t disabled_until = 0;
+    // TickType_t disabled_until = 0;
 
     float pid_output=0;
     
@@ -359,23 +366,30 @@ void set_valve_pwm_task() {
             // } else {
             //     abs_output=0
             // }
-            
-            TickType_t now=xTaskGetTickCount();
-            
-            if (now>disabled_until) {
 
-                // Set PWM duty cycles
-                ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_INC, duty_inc));
-                ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_INC));
+
+            ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_INC, duty_inc));
+            ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_INC));
+            
+            ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC, max_duty-duty_dec)); //inverting output max_duty-duty_dec
+            ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC));
+            
+            // TickType_t now=xTaskGetTickCount();
+            
+            // if (now>disabled_until) {
+
+            //     // Set PWM duty cycles
+            //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_INC, duty_inc));
+            //     ESP_ERROR_CHECK(ledc_update_duty(LPOLLING_DELAYEDC_LOW_SPEED_MODE, PWM_CHANNEL_INC));
                 
-                ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC, max_duty-duty_dec)); //inverting output max_duty-duty_dec
-                ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC));
+            //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC, max_duty-duty_dec)); //inverting output max_duty-duty_dec
+            //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL_DEC));
                 
-                // ESP_LOGI(TAG_VALVE, "PID: %.2f -> INC duty: %.2f, DEC duty: %.2f", 
-                //         pid_output, (float)duty_inc/max_duty, (float)duty_dec/max_duty);
+            ESP_LOGD(TAG_VALVE, "PID: %.2f -> INC duty: %.2f, DEC duty: %.2f", 
+                    pid_output, (float)duty_inc/max_duty, (float)duty_dec/max_duty);
                 
-                disabled_until=now+pdMS_TO_TICKS(VALVE_IDLE_DELAY);
-            }
+            //     disabled_until=now+pdMS_TO_TICKS(VALVE_IDLE_DELAY);
+            // }
         }
     }
 
@@ -476,13 +490,13 @@ void app_main(void)
 
     TaskHandle_t* read_buttons_task_handler = button_reader_init(i2c_periphery.pcf);
     
-    xTaskCreate(adc_continuous_read_task, "adc_read_task", 8192, NULL, 9, NULL);
-    xTaskCreate(polling_task, "polling_task", 2048, NULL, 7, &s_polling_task_handle);
-    xTaskCreate(PID_task, "PID_task", 4096, NULL, 8, NULL);
-    xTaskCreate(set_valve_pwm_task, "set_valve_pwm_task", 2048, NULL, 9, NULL);
-    xTaskCreate(usb_input_task, "usb_input_task", 4096, NULL, 5, NULL);
-    xTaskCreate(current_loop_output_task, "current_loop_output_task", 4096, NULL, 9, NULL);
-    xTaskCreate(read_buttons_task,"read_buttons_task", 2048, NULL, 7, read_buttons_task_handler);
+    xTaskCreate(adc_continuous_read_task, "adc_read_task",            8192, NULL, 9, NULL);
+    xTaskCreate(polling_task,             "polling_task",             2048, NULL, 7, &s_polling_task_handle);
+    xTaskCreate(PID_task,                 "PID_task",                 4096, NULL, 8, NULL);
+    xTaskCreate(set_valve_pwm_task,       "set_valve_pwm_task",       2048, NULL, 9, NULL);
+    xTaskCreate(usb_input_task,           "usb_input_task",           4096, NULL, 5, NULL);
+    xTaskCreate(current_loop_output_task, "cl_output_task",           4096, NULL, 9, NULL);
+    xTaskCreate(read_buttons_task,        "read_buttons_task",        2048, NULL, 7, read_buttons_task_handler);
 
     calibration_init(output_queue);
     xTaskCreate(calibration_task, "calibration_task", 4096, NULL, 8, NULL);

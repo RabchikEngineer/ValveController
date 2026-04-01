@@ -75,6 +75,7 @@ void calibration_task() {
 
     cal_start_cmd_t start_cmd;
     cal_control_cmd_t ctrl_cmd;
+    BaseType_t queue_err;
 
     while (1) {
         if (xQueueReceive(calibration_start_queue, &start_cmd, portMAX_DELAY) != pdTRUE) {
@@ -95,14 +96,15 @@ void calibration_task() {
 
                 // 1: Test borders and make 2-point calibration
                 suspend_polling();
-                vTaskDelay(pdMS_TO_TICKS(VALVE_IDLE_DELAY*2));
+                vTaskDelay(pdMS_TO_TICKS(POLLING_DELAY*10));
 
 
                 // text = "Calibrating upper limit";
                 // Move to the upper position
                 pid_output_override=1;
                 cal_send_status(CAL_AP_UPPER_LIMIT, 0);
-                xQueueSend(s_set_position_queue,&pid_output_override, portMAX_DELAY);
+                queue_err = xQueueSend(s_set_position_queue,&pid_output_override, portMAX_DELAY);
+                if (queue_err!=pdTRUE) {ESP_LOGE(TAG, "Cannot send values to queue during AP1");}
                 vTaskDelay(pdMS_TO_TICKS(5000)); // wait for 5 seconds to stabilize 
                 actual_position = get_raw_adc_values().actualPositionPercent;
                 calibration_points.points[0]=(data_point_t){actual_position, 1}; // assuming that valve is in upper position
@@ -110,7 +112,8 @@ void calibration_task() {
                 // text = "Calibrating lower limit";
                 pid_output_override=-1;
                 cal_send_status(CAL_AP_LOWER_LIMIT, 0);
-                xQueueSend(s_set_position_queue,&pid_output_override, portMAX_DELAY);
+                queue_err = xQueueSend(s_set_position_queue,&pid_output_override, portMAX_DELAY);
+                if (queue_err!=pdTRUE) {ESP_LOGE(TAG, "Cannot send values to queue during AP2");}
                 vTaskDelay(pdMS_TO_TICKS(5000));
                 actual_position = get_raw_adc_values().actualPositionPercent;
                 calibration_points.points[1]=(data_point_t){actual_position, 0}; 
@@ -161,7 +164,7 @@ void calibration_task() {
                 calibration_points=(approx_poly_line_t){.num_points=2, .points={}};
 
                 suspend_polling();
-                vTaskDelay(pdMS_TO_TICKS(VALVE_IDLE_DELAY*2));
+                vTaskDelay(pdMS_TO_TICKS(POLLING_DELAY*10));
                 
                 desired_value=0;
                 cal_send_status(CAL_DP_SET_VALUE, desired_value);
@@ -236,7 +239,7 @@ void calibration_task() {
                 calibration_points=(approx_poly_line_t){.num_points=2, .points={}};
                 
                 suspend_polling();
-                vTaskDelay(pdMS_TO_TICKS(VALVE_IDLE_DELAY*2));
+                vTaskDelay(pdMS_TO_TICKS(POLLING_DELAY*10));
 
                 
                 desired_value=0;
